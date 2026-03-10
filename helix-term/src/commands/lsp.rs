@@ -88,6 +88,54 @@ struct SymbolInformationItem {
     symbol: lsp::SymbolInformation,
 }
 
+struct SymbolStyles {
+    function: Style,
+    r#type: Style,
+    variable: Style,
+    constant: Style,
+    module: Style,
+    keyword: Style,
+    string: Style,
+    constructor: Style,
+}
+
+impl SymbolStyles {
+    fn new(editor: &Editor) -> Self {
+        Self {
+            function: editor.theme.get("function"),
+            r#type: editor.theme.get("type"),
+            variable: editor.theme.get("variable"),
+            constant: editor.theme.get("constant"),
+            module: editor.theme.get("module"),
+            keyword: editor.theme.get("keyword"),
+            string: editor.theme.get("string"),
+            constructor: editor.theme.get("constructor"),
+        }
+    }
+
+    fn symbol_style(&self, kind: lsp::SymbolKind) -> Style {
+        match kind {
+            lsp::SymbolKind::FUNCTION | lsp::SymbolKind::METHOD => self.function,
+            lsp::SymbolKind::CLASS
+            | lsp::SymbolKind::STRUCT
+            | lsp::SymbolKind::INTERFACE
+            | lsp::SymbolKind::ENUM
+            | lsp::SymbolKind::TYPE_PARAMETER => self.r#type,
+            lsp::SymbolKind::VARIABLE | lsp::SymbolKind::FIELD | lsp::SymbolKind::PROPERTY => {
+                self.variable
+            }
+            lsp::SymbolKind::CONSTANT | lsp::SymbolKind::ENUM_MEMBER => self.constant,
+            lsp::SymbolKind::MODULE
+            | lsp::SymbolKind::NAMESPACE
+            | lsp::SymbolKind::PACKAGE => self.module,
+            lsp::SymbolKind::KEY | lsp::SymbolKind::BOOLEAN => self.keyword,
+            lsp::SymbolKind::STRING => self.string,
+            lsp::SymbolKind::CONSTRUCTOR => self.constructor,
+            _ => Style::default(),
+        }
+    }
+}
+
 struct DiagnosticStyles {
     hint: Style,
     info: Style,
@@ -404,18 +452,22 @@ pub fn symbol_picker(cx: &mut Context) {
                 Err(err) => log::error!("Error requesting document symbols: {err}"),
             }
         }
-        let call = move |_editor: &mut Editor, compositor: &mut Compositor| {
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            let styles = SymbolStyles::new(editor);
             let columns = [
-                ui::PickerColumn::new("kind", |item: &SymbolInformationItem, _| {
-                    display_symbol_kind(item.symbol.kind).into()
-                }),
+                ui::PickerColumn::new(
+                    "kind",
+                    |item: &SymbolInformationItem, _: &SymbolStyles| {
+                        display_symbol_kind(item.symbol.kind).into()
+                    },
+                ),
                 // Some symbols in the document symbol picker may have a URI that isn't
                 // the current file. It should be rare though, so we concatenate that
                 // URI in with the symbol name in this picker.
-                ui::PickerColumn::new("name", |item: &SymbolInformationItem, _| {
-                    item.symbol.name.as_str().into()
+                ui::PickerColumn::new("name", |item: &SymbolInformationItem, styles: &SymbolStyles| {
+                    Span::styled(item.symbol.name.as_str(), styles.symbol_style(item.symbol.kind)).into()
                 }),
-                ui::PickerColumn::new("container", |item: &SymbolInformationItem, _| {
+                ui::PickerColumn::new("container", |item: &SymbolInformationItem, _: &SymbolStyles| {
                     item.symbol
                         .container_name
                         .as_deref()
@@ -428,7 +480,7 @@ pub fn symbol_picker(cx: &mut Context) {
                 columns,
                 1, // name column
                 symbols,
-                (),
+                styles,
                 move |cx, item, action| {
                     jump_to_location(cx.editor, &item.location, action);
                 },
@@ -523,22 +575,26 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
         }
         .boxed()
     };
+    let styles = SymbolStyles::new(cx.editor);
     let columns = [
-        ui::PickerColumn::new("kind", |item: &SymbolInformationItem, _| {
-            display_symbol_kind(item.symbol.kind).into()
-        }),
-        ui::PickerColumn::new("name", |item: &SymbolInformationItem, _| {
-            item.symbol.name.as_str().into()
+        ui::PickerColumn::new(
+            "kind",
+            |item: &SymbolInformationItem, _: &SymbolStyles| {
+                display_symbol_kind(item.symbol.kind).into()
+            },
+        ),
+        ui::PickerColumn::new("name", |item: &SymbolInformationItem, styles: &SymbolStyles| {
+            Span::styled(item.symbol.name.as_str(), styles.symbol_style(item.symbol.kind)).into()
         })
         .without_filtering(),
-        ui::PickerColumn::new("container", |item: &SymbolInformationItem, _| {
+        ui::PickerColumn::new("container", |item: &SymbolInformationItem, _: &SymbolStyles| {
             item.symbol
                 .container_name
                 .as_deref()
                 .unwrap_or_default()
                 .into()
         }),
-        ui::PickerColumn::new("path", |item: &SymbolInformationItem, _| {
+        ui::PickerColumn::new("path", |item: &SymbolInformationItem, _: &SymbolStyles| {
             if let Some(path) = item.location.uri.as_path() {
                 path::get_relative_path(path)
                     .to_string_lossy()
@@ -554,7 +610,7 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
         columns,
         1, // name column
         [],
-        (),
+        styles,
         move |cx, item, action| {
             jump_to_location(cx.editor, &item.location, action);
         },

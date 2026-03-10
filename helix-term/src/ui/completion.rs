@@ -25,10 +25,59 @@ use tui::{buffer::Buffer as Surface, text::Span};
 
 use std::cmp::Reverse;
 
-impl menu::Item for CompletionItem {
-    type Data = Style;
+pub struct CompletionStyles {
+    pub dir_style: Style,
+    pub function: Style,
+    pub r#type: Style,
+    pub variable: Style,
+    pub constant: Style,
+    pub module: Style,
+    pub keyword: Style,
+    pub constructor: Style,
+}
 
-    fn format(&self, dir_style: &Self::Data) -> menu::Row<'_> {
+impl CompletionStyles {
+    pub fn new(editor: &helix_view::Editor) -> Self {
+        Self {
+            dir_style: editor.theme.get("ui.text.directory"),
+            function: editor.theme.get("function"),
+            r#type: editor.theme.get("type"),
+            variable: editor.theme.get("variable"),
+            constant: editor.theme.get("constant"),
+            module: editor.theme.get("module"),
+            keyword: editor.theme.get("keyword"),
+            constructor: editor.theme.get("constructor"),
+        }
+    }
+
+    fn completion_kind_style(&self, kind: Option<lsp::CompletionItemKind>) -> Style {
+        match kind {
+            Some(lsp::CompletionItemKind::FUNCTION) | Some(lsp::CompletionItemKind::METHOD) => {
+                self.function
+            }
+            Some(lsp::CompletionItemKind::CLASS)
+            | Some(lsp::CompletionItemKind::STRUCT)
+            | Some(lsp::CompletionItemKind::INTERFACE)
+            | Some(lsp::CompletionItemKind::ENUM)
+            | Some(lsp::CompletionItemKind::TYPE_PARAMETER) => self.r#type,
+            Some(lsp::CompletionItemKind::VARIABLE)
+            | Some(lsp::CompletionItemKind::FIELD)
+            | Some(lsp::CompletionItemKind::PROPERTY) => self.variable,
+            Some(lsp::CompletionItemKind::CONSTANT)
+            | Some(lsp::CompletionItemKind::ENUM_MEMBER) => self.constant,
+            Some(lsp::CompletionItemKind::MODULE) => self.module,
+            Some(lsp::CompletionItemKind::KEYWORD) => self.keyword,
+            Some(lsp::CompletionItemKind::CONSTRUCTOR) => self.constructor,
+            Some(lsp::CompletionItemKind::FOLDER) => self.dir_style,
+            _ => Style::default(),
+        }
+    }
+}
+
+impl menu::Item for CompletionItem {
+    type Data = CompletionStyles;
+
+    fn format(&self, styles: &Self::Data) -> menu::Row<'_> {
         let deprecated = match self {
             CompletionItem::Lsp(LspCompletionItem { item, .. }) => {
                 item.deprecated.unwrap_or_default()
@@ -44,6 +93,13 @@ impl menu::Item for CompletionItem {
             CompletionItem::Lsp(LspCompletionItem { item, .. }) => item.label.as_str(),
             CompletionItem::Other(core::CompletionItem { label, .. }) => label,
         };
+
+        let lsp_kind = match self {
+            CompletionItem::Lsp(LspCompletionItem { item, .. }) => item.kind,
+            CompletionItem::Other(_) => None,
+        };
+
+        let kind_style = styles.completion_kind_style(lsp_kind);
 
         let kind = match self {
             CompletionItem::Lsp(LspCompletionItem { item, .. }) => match item.kind {
@@ -101,16 +157,12 @@ impl menu::Item for CompletionItem {
             CompletionItem::Other(core::CompletionItem { kind, .. }) => kind.as_ref().into(),
         };
 
-        let label = Span::styled(
-            label,
-            if deprecated {
-                Style::default().add_modifier(Modifier::CROSSED_OUT)
-            } else if kind.0[0].content == "folder" {
-                *dir_style
-            } else {
-                Style::default()
-            },
-        );
+        let label_style = if deprecated {
+            Style::default().add_modifier(Modifier::CROSSED_OUT)
+        } else {
+            kind_style
+        };
+        let label = Span::styled(label, label_style);
 
         menu::Row::new([menu::Cell::from(label), menu::Cell::from(kind)])
     }
@@ -133,10 +185,10 @@ impl Completion {
         let preview_completion_insert = editor.config().preview_completion_insert;
         let replace_mode = editor.config().completion_replace;
 
-        let dir_style = editor.theme.get("ui.text.directory");
+        let styles = CompletionStyles::new(editor);
 
         // Then create the menu
-        let menu = Menu::new(items, dir_style, move |editor: &mut Editor, item, event| {
+        let menu = Menu::new(items, styles, move |editor: &mut Editor, item, event| {
             let (view, doc) = current!(editor);
 
             macro_rules! language_server {
