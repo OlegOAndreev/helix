@@ -26,49 +26,73 @@ use tui::{buffer::Buffer as Surface, text::Span};
 use std::cmp::Reverse;
 
 pub struct CompletionStyles {
-    pub dir_style: Style,
-    pub function: Style,
-    pub r#type: Style,
-    pub variable: Style,
-    pub constant: Style,
-    pub module: Style,
-    pub keyword: Style,
-    pub constructor: Style,
+    dir_style: Style,
+    method: Style,
+    function: Style,
+    constructor: Style,
+    field: Style,
+    r#type: Style,
+    variable: Style,
+    constant: Style,
+    r#enum: Style,
+    enum_variant: Style,
+    module: Style,
+    keyword: Style,
+    text: Style,
+    snippet: Style,
+    file: Style,
+    operator: Style,
 }
 
 impl CompletionStyles {
     pub fn new(editor: &helix_view::Editor) -> Self {
         Self {
             dir_style: editor.theme.get("ui.text.directory"),
+            method: editor.theme.get("function.method"),
             function: editor.theme.get("function"),
+            constructor: editor.theme.get("constructor"),
+            field: editor.theme.get("variable.other.member"),
             r#type: editor.theme.get("type"),
             variable: editor.theme.get("variable"),
             constant: editor.theme.get("constant"),
-            module: editor.theme.get("module"),
+            r#enum: editor.theme.get("type.enum"),
+            enum_variant: editor.theme.get("type.enum.variant"),
+            module: editor.theme.get("namespace"),
             keyword: editor.theme.get("keyword"),
-            constructor: editor.theme.get("constructor"),
+            text: editor.theme.get("ui.text"),
+            snippet: editor.theme.get("ui.text"),
+            file: editor.theme.get("ui.text"),
+            operator: editor.theme.get("operator"),
         }
     }
 
     fn completion_kind_style(&self, kind: Option<lsp::CompletionItemKind>) -> Style {
         match kind {
-            Some(lsp::CompletionItemKind::FUNCTION) | Some(lsp::CompletionItemKind::METHOD) => {
-                self.function
-            }
-            Some(lsp::CompletionItemKind::CLASS)
-            | Some(lsp::CompletionItemKind::STRUCT)
-            | Some(lsp::CompletionItemKind::INTERFACE)
-            | Some(lsp::CompletionItemKind::ENUM)
-            | Some(lsp::CompletionItemKind::TYPE_PARAMETER) => self.r#type,
-            Some(lsp::CompletionItemKind::VARIABLE)
-            | Some(lsp::CompletionItemKind::FIELD)
-            | Some(lsp::CompletionItemKind::PROPERTY) => self.variable,
-            Some(lsp::CompletionItemKind::CONSTANT)
-            | Some(lsp::CompletionItemKind::ENUM_MEMBER) => self.constant,
-            Some(lsp::CompletionItemKind::MODULE) => self.module,
-            Some(lsp::CompletionItemKind::KEYWORD) => self.keyword,
+            Some(lsp::CompletionItemKind::TEXT) => self.text,
+            Some(lsp::CompletionItemKind::METHOD) => self.method,
+            Some(lsp::CompletionItemKind::FUNCTION) => self.function,
             Some(lsp::CompletionItemKind::CONSTRUCTOR) => self.constructor,
+            Some(lsp::CompletionItemKind::FIELD) => self.field,
+            Some(lsp::CompletionItemKind::VARIABLE) => self.variable,
+            Some(lsp::CompletionItemKind::CLASS) => self.r#type,
+            Some(lsp::CompletionItemKind::INTERFACE) => self.r#type,
+            Some(lsp::CompletionItemKind::MODULE) => self.module,
+            Some(lsp::CompletionItemKind::PROPERTY) => self.field,
+            Some(lsp::CompletionItemKind::UNIT) => self.constant,
+            Some(lsp::CompletionItemKind::VALUE) => self.constant,
+            Some(lsp::CompletionItemKind::ENUM) => self.r#enum,
+            Some(lsp::CompletionItemKind::KEYWORD) => self.keyword,
+            Some(lsp::CompletionItemKind::SNIPPET) => self.snippet,
+            Some(lsp::CompletionItemKind::COLOR) => self.constant,
+            Some(lsp::CompletionItemKind::FILE) => self.file,
+            Some(lsp::CompletionItemKind::REFERENCE) => self.text,
             Some(lsp::CompletionItemKind::FOLDER) => self.dir_style,
+            Some(lsp::CompletionItemKind::ENUM_MEMBER) => self.enum_variant,
+            Some(lsp::CompletionItemKind::CONSTANT) => self.variable,
+            Some(lsp::CompletionItemKind::STRUCT) => self.r#type,
+            Some(lsp::CompletionItemKind::EVENT) => self.r#type,
+            Some(lsp::CompletionItemKind::OPERATOR) => self.operator,
+            Some(lsp::CompletionItemKind::TYPE_PARAMETER) => self.r#type,
             _ => Style::default(),
         }
     }

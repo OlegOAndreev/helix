@@ -89,48 +89,66 @@ struct SymbolInformationItem {
 }
 
 struct SymbolStyles {
+    method: Style,
     function: Style,
+    constructor: Style,
+    field: Style,
     r#type: Style,
     variable: Style,
-    constant: Style,
+    r#enum: Style,
+    enum_variant: Style,
     module: Style,
-    keyword: Style,
-    string: Style,
-    constructor: Style,
+    text: Style,
+    file: Style,
+    operator: Style,
 }
 
 impl SymbolStyles {
     fn new(editor: &Editor) -> Self {
         Self {
+            method: editor.theme.get("function.method"),
             function: editor.theme.get("function"),
+            constructor: editor.theme.get("constructor"),
+            field: editor.theme.get("variable.other.member"),
             r#type: editor.theme.get("type"),
             variable: editor.theme.get("variable"),
-            constant: editor.theme.get("constant"),
-            module: editor.theme.get("module"),
-            keyword: editor.theme.get("keyword"),
-            string: editor.theme.get("string"),
-            constructor: editor.theme.get("constructor"),
+            r#enum: editor.theme.get("type.enum"),
+            enum_variant: editor.theme.get("type.enum.variant"),
+            module: editor.theme.get("namespace"),
+            text: editor.theme.get("ui.text"),
+            file: editor.theme.get("ui.text"),
+            operator: editor.theme.get("operator"),
         }
     }
 
     fn symbol_style(&self, kind: lsp::SymbolKind) -> Style {
         match kind {
-            lsp::SymbolKind::FUNCTION | lsp::SymbolKind::METHOD => self.function,
-            lsp::SymbolKind::CLASS
-            | lsp::SymbolKind::STRUCT
-            | lsp::SymbolKind::INTERFACE
-            | lsp::SymbolKind::ENUM
-            | lsp::SymbolKind::TYPE_PARAMETER => self.r#type,
-            lsp::SymbolKind::VARIABLE | lsp::SymbolKind::FIELD | lsp::SymbolKind::PROPERTY => {
-                self.variable
-            }
-            lsp::SymbolKind::CONSTANT | lsp::SymbolKind::ENUM_MEMBER => self.constant,
-            lsp::SymbolKind::MODULE | lsp::SymbolKind::NAMESPACE | lsp::SymbolKind::PACKAGE => {
-                self.module
-            }
-            lsp::SymbolKind::KEY | lsp::SymbolKind::BOOLEAN => self.keyword,
-            lsp::SymbolKind::STRING => self.string,
+            lsp::SymbolKind::FILE => self.file,
+            lsp::SymbolKind::MODULE => self.module,
+            lsp::SymbolKind::NAMESPACE => self.module,
+            lsp::SymbolKind::PACKAGE => self.module,
+            lsp::SymbolKind::CLASS => self.r#type,
+            lsp::SymbolKind::METHOD => self.method,
+            lsp::SymbolKind::PROPERTY => self.field,
+            lsp::SymbolKind::FIELD => self.field,
             lsp::SymbolKind::CONSTRUCTOR => self.constructor,
+            lsp::SymbolKind::ENUM => self.r#enum,
+            lsp::SymbolKind::INTERFACE => self.r#type,
+            lsp::SymbolKind::FUNCTION => self.function,
+            lsp::SymbolKind::VARIABLE => self.variable,
+            lsp::SymbolKind::CONSTANT => self.variable,
+            lsp::SymbolKind::STRING => self.text,
+            lsp::SymbolKind::NUMBER => self.text,
+            lsp::SymbolKind::BOOLEAN => self.text,
+            lsp::SymbolKind::ARRAY => self.text,
+            lsp::SymbolKind::OBJECT => self.r#type,
+            lsp::SymbolKind::KEY => self.text,
+            lsp::SymbolKind::NULL => self.text,
+            lsp::SymbolKind::ENUM_MEMBER => self.enum_variant,
+            lsp::SymbolKind::STRUCT => self.r#type,
+            lsp::SymbolKind::EVENT => self.r#type,
+            lsp::SymbolKind::OPERATOR => self.operator,
+            lsp::SymbolKind::TYPE_PARAMETER => self.r#type,
             _ => Style::default(),
         }
     }
