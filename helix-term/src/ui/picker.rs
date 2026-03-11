@@ -47,6 +47,7 @@ use helix_core::{
 use helix_view::{
     editor::Action,
     graphics::{CursorKind, Margin, Modifier, Rect},
+    input::{MouseButton, MouseEvent, MouseEventKind},
     theme::Style,
     view::ViewPosition,
     Document, DocumentId, Editor,
@@ -269,6 +270,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     /// An event handler for syntax highlighting the currently previewed file.
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
+    /// Current render area, stored for mouse coordinate mapping
+    current_area: Option<Rect>,
 }
 
 impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
@@ -394,6 +397,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             file_fn: None,
             preview_highlight_handler: PreviewHighlightHandler::<T, D>::default().spawn(),
             dynamic_query_handler: None,
+            current_area: None,
         }
     }
 
@@ -517,6 +521,101 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             1
         } else {
             0
+        }
+    }
+
+    /// Convert mouse Y coordinate to row index in the picker list
+    /// Returns None if the coordinate is not within the table area
+    fn mouse_y_to_row_index(&self, mouse_y: u16, picker_area: Rect) -> Option<usize> {
+        // Convert absolute screen Y to relative Y within picker
+        let relative_y = mouse_y.saturating_sub(picker_area.top());
+
+        // Skip border (1), prompt (1), separator (1) = 3 rows
+        if relative_y < 3 {
+            return None;
+        }
+
+        // Calculate row in table (after header)
+        let table_relative_y = relative_y - 3;
+        let header_height = self.header_height() as u16;
+
+        if table_relative_y < header_height {
+            return None; // Clicked header
+        }
+
+        // Row index in visible items
+        let row_in_view = (table_relative_y - header_height) as usize;
+
+        // Account for scroll offset
+        let rows_visible = self.completion_height as u32;
+        let scroll_offset = self.cursor - (self.cursor % std::cmp::max(1, rows_visible));
+
+        // Calculate actual index
+        let actual_index = scroll_offset as usize + row_in_view;
+
+        // Check bounds
+        let total_items = self.matcher.snapshot().matched_item_count() as usize;
+        if actual_index >= total_items {
+            return None;
+        }
+
+        Some(actual_index)
+    }
+
+    /// Handle mouse events for scrolling and selection
+    fn handle_mouse_event(&mut self, event: &MouseEvent) -> EventResult {
+        let Some(area) = self.current_area else {
+            return EventResult::Ignored(None);
+        };
+
+        let MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            ..
+        } = *event;
+
+        // Calculate picker area (considering preview panel)
+        let render_preview =
+            self.show_preview && self.file_fn.is_some() && area.width > MIN_AREA_WIDTH_FOR_PREVIEW;
+        let picker_width = if render_preview {
+            area.width / 2
+        } else {
+            area.width
+        };
+        let picker_area = area.with_width(picker_width);
+
+        // Check if mouse is within picker bounds (similar to Popup)
+        let mouse_is_within_picker = x >= picker_area.left()
+            && x < picker_area.right()
+            && y >= picker_area.top()
+            && y < picker_area.bottom();
+
+        if !mouse_is_within_picker {
+            return EventResult::Ignored(None);
+        }
+
+        match kind {
+            MouseEventKind::ScrollDown => {
+                // Scroll one item at a time
+                self.move_by(1, Direction::Forward);
+                EventResult::Consumed(None)
+            }
+            MouseEventKind::ScrollUp => {
+                // Scroll one item at a time
+                self.move_by(1, Direction::Backward);
+                EventResult::Consumed(None)
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Single click: select item only (no double-click support)
+                if let Some(row_index) = self.mouse_y_to_row_index(y, picker_area) {
+                    self.cursor = row_index as u32;
+                    EventResult::Consumed(None)
+                } else {
+                    EventResult::Ignored(None)
+                }
+            }
+            _ => EventResult::Ignored(None),
         }
     }
 
@@ -1026,6 +1125,9 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
 impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I, D> {
     fn render(&mut self, area: Rect, surface: &mut Surface, cx: &mut Context) {
+        // Store current area for mouse coordinate mapping
+        self.current_area = Some(area);
+
         // +---------+ +---------+
         // |prompt   | |preview  |
         // +---------+ |         |
@@ -1054,117 +1156,121 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
     fn handle_event(&mut self, event: &Event, ctx: &mut Context) -> EventResult {
         // TODO: keybinds for scrolling preview
 
-        let key_event = match event {
-            Event::Key(event) => *event,
-            Event::Paste(..) => return self.prompt_handle_event(event, ctx),
-            Event::Resize(..) => return EventResult::Consumed(None),
-            _ => return EventResult::Ignored(None),
-        };
+        match event {
+            Event::Key(event) => {
+                let key_event = *event;
 
-        let close_fn = |picker: &mut Self| {
-            // if the picker is very large don't store it as last_picker to avoid
-            // excessive memory consumption
-            let callback: compositor::Callback =
-                if picker.matcher.snapshot().item_count() > 1_000_000 {
-                    Box::new(|compositor: &mut Compositor, _ctx| {
-                        // remove the layer
-                        compositor.pop();
-                    })
-                } else {
-                    // stop streaming in new items in the background, really we should
-                    // be restarting the stream somehow once the picker gets
-                    // reopened instead (like for an FS crawl) that would also remove the
-                    // need for the special case above but that is pretty tricky
-                    picker.version.fetch_add(1, atomic::Ordering::Relaxed);
-                    Box::new(|compositor: &mut Compositor, _ctx| {
-                        // remove the layer
-                        compositor.last_picker = compositor.pop();
-                    })
+                let close_fn = |picker: &mut Self| {
+                    // if the picker is very large don't store it as last_picker to avoid
+                    // excessive memory consumption
+                    let callback: compositor::Callback =
+                        if picker.matcher.snapshot().item_count() > 1_000_000 {
+                            Box::new(|compositor: &mut Compositor, _ctx| {
+                                // remove the layer
+                                compositor.pop();
+                            })
+                        } else {
+                            // stop streaming in new items in the background, really we should
+                            // be restarting the stream somehow once the picker gets
+                            // reopened instead (like for an FS crawl) that would also remove the
+                            // need for the special case above but that is pretty tricky
+                            picker.version.fetch_add(1, atomic::Ordering::Relaxed);
+                            Box::new(|compositor: &mut Compositor, _ctx| {
+                                // remove the layer
+                                compositor.last_picker = compositor.pop();
+                            })
+                        };
+                    EventResult::Consumed(Some(callback))
                 };
-            EventResult::Consumed(Some(callback))
-        };
 
-        match key_event {
-            shift!(Tab) | key!(Up) | ctrl!('p') => {
-                self.move_by(1, Direction::Backward);
-            }
-            key!(Tab) | key!(Down) | ctrl!('n') => {
-                self.move_by(1, Direction::Forward);
-            }
-            key!(PageDown) | ctrl!('d') => {
-                self.page_down();
-            }
-            key!(PageUp) | ctrl!('u') => {
-                self.page_up();
-            }
-            key!(Home) => {
-                self.to_start();
-            }
-            key!(End) => {
-                self.to_end();
-            }
-            key!(Esc) | ctrl!('c') => return close_fn(self),
-            alt!(Enter) => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, self.default_action);
-                }
-            }
-            key!(Enter) => {
-                // If the prompt has a history completion and is empty, use enter to accept
-                // that completion
-                if let Some(completion) = self
-                    .prompt
-                    .first_history_completion(ctx.editor)
-                    .filter(|_| self.prompt.line().is_empty())
-                {
-                    // The percent character is used by the query language and needs to be
-                    // escaped with a backslash.
-                    let completion = if completion.contains('%') {
-                        completion.replace('%', "\\%")
-                    } else {
-                        completion.into_owned()
-                    };
-                    self.prompt.set_line(completion, ctx.editor);
-
-                    // Inserting from the history register is a paste.
-                    self.handle_prompt_change(true);
-                } else {
-                    if let Some(option) = self.selection() {
-                        (self.callback_fn)(ctx, option, self.default_action);
+                match key_event {
+                    shift!(Tab) | key!(Up) | ctrl!('p') => {
+                        self.move_by(1, Direction::Backward);
                     }
-                    if let Some(history_register) = self.prompt.history_register() {
-                        if let Err(err) = ctx
-                            .editor
-                            .registers
-                            .push(history_register, self.primary_query().to_string())
-                        {
-                            ctx.editor.set_error(err.to_string());
+                    key!(Tab) | key!(Down) | ctrl!('n') => {
+                        self.move_by(1, Direction::Forward);
+                    }
+                    key!(PageDown) | ctrl!('d') => {
+                        self.page_down();
+                    }
+                    key!(PageUp) | ctrl!('u') => {
+                        self.page_up();
+                    }
+                    key!(Home) => {
+                        self.to_start();
+                    }
+                    key!(End) => {
+                        self.to_end();
+                    }
+                    key!(Esc) | ctrl!('c') => return close_fn(self),
+                    alt!(Enter) => {
+                        if let Some(option) = self.selection() {
+                            (self.callback_fn)(ctx, option, self.default_action);
                         }
                     }
-                    return close_fn(self);
-                }
-            }
-            ctrl!('s') => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, Action::HorizontalSplit);
-                }
-                return close_fn(self);
-            }
-            ctrl!('v') => {
-                if let Some(option) = self.selection() {
-                    (self.callback_fn)(ctx, option, Action::VerticalSplit);
-                }
-                return close_fn(self);
-            }
-            ctrl!('t') => {
-                self.toggle_preview();
-            }
-            _ => {
-                self.prompt_handle_event(event, ctx);
-            }
-        }
+                    key!(Enter) => {
+                        // If the prompt has a history completion and is empty, use enter to accept
+                        // that completion
+                        if let Some(completion) = self
+                            .prompt
+                            .first_history_completion(ctx.editor)
+                            .filter(|_| self.prompt.line().is_empty())
+                        {
+                            // The percent character is used by the query language and needs to be
+                            // escaped with a backslash.
+                            let completion = if completion.contains('%') {
+                                completion.replace('%', "\\%")
+                            } else {
+                                completion.into_owned()
+                            };
+                            self.prompt.set_line(completion, ctx.editor);
 
-        EventResult::Consumed(None)
+                            // Inserting from the history register is a paste.
+                            self.handle_prompt_change(true);
+                        } else {
+                            if let Some(option) = self.selection() {
+                                (self.callback_fn)(ctx, option, self.default_action);
+                            }
+                            if let Some(history_register) = self.prompt.history_register() {
+                                if let Err(err) = ctx
+                                    .editor
+                                    .registers
+                                    .push(history_register, self.primary_query().to_string())
+                                {
+                                    ctx.editor.set_error(err.to_string());
+                                }
+                            }
+                            return close_fn(self);
+                        }
+                    }
+                    ctrl!('s') => {
+                        if let Some(option) = self.selection() {
+                            (self.callback_fn)(ctx, option, Action::HorizontalSplit);
+                        }
+                        return close_fn(self);
+                    }
+                    ctrl!('v') => {
+                        if let Some(option) = self.selection() {
+                            (self.callback_fn)(ctx, option, Action::VerticalSplit);
+                        }
+                        return close_fn(self);
+                    }
+                    ctrl!('t') => {
+                        self.toggle_preview();
+                    }
+                    _ => {
+                        // Pass the original event (Event::Key) to prompt_handle_event
+                        self.prompt_handle_event(&Event::Key(key_event), ctx);
+                    }
+                }
+
+                EventResult::Consumed(None)
+            }
+            Event::Paste(..) => return self.prompt_handle_event(event, ctx),
+            Event::Resize(..) => return EventResult::Consumed(None),
+            Event::Mouse(event) => return self.handle_mouse_event(event),
+            _ => return EventResult::Ignored(None),
+        }
     }
 
     fn cursor(&self, area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
