@@ -55,6 +55,7 @@
 | dockerfile | ✓ | ✓ |  |  |  | `docker-langserver`, `docker-language-server` |
 | dot | ✓ |  |  |  |  | `dot-language-server` |
 | doxyfile | ✓ | ✓ | ✓ | ✓ |  |  |
+| drools |  |  |  |  |  | `drools-lsp` |
 | dtd | ✓ |  |  |  |  |  |
 | dune | ✓ |  |  |  |  |  |
 | dunstrc | ✓ |  |  |  |  |  |
@@ -273,6 +274,7 @@
 | starlark | ✓ | ✓ | ✓ |  | ✓ | `starpls` |
 | strace | ✓ |  |  |  |  |  |
 | strictdoc | ✓ |  |  | ✓ |  |  |
+| styx | ✓ | ✓ | ✓ |  | ✓ | `styx` |
 | supercollider | ✓ |  |  |  |  |  |
 | svelte | ✓ | ✓ | ✓ |  | ✓ | `svelteserver` |
 | sway | ✓ | ✓ | ✓ |  |  | `forc` |

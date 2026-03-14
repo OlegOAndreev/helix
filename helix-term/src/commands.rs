@@ -1327,21 +1327,97 @@ fn goto_file_vsplit(cx: &mut Context) {
     goto_file_impl(cx, Action::VerticalSplit);
 }
 
-/// Goto files in selection.
+/// Returns true when a selection overlaps an LSP document link range.
+fn selection_overlaps_document_link(
+    selection: &Range,
+    link: &helix_view::document::DocumentLink,
+) -> bool {
+    if selection.is_empty() {
+        let pos = selection.from();
+        link.start <= pos && pos < link.end
+    } else {
+        selection.from() < link.end && selection.to() > link.start
+    }
+}
+
+/// Resolve a document link target, using the LSP resolve request when needed.
+fn resolve_document_link_target(
+    editor: &Editor,
+    link: &helix_view::document::DocumentLink,
+) -> Option<Url> {
+    if let Some(target) = link.link.target.clone() {
+        return Some(target);
+    }
+
+    let language_server = editor.language_server_by_id(link.language_server_id)?;
+    let supports_resolve = language_server
+        .capabilities()
+        .document_link_provider
+        .as_ref()?
+        .resolve_provider
+        .unwrap_or(false);
+
+    if !supports_resolve {
+        return None;
+    }
+
+    let future = language_server.resolve_document_link(link.link.clone())?;
+    helix_lsp::block_on(future).ok()?.target
+}
+
+/// Goto files/URLs in selection.
+///
+/// Prefers LSP document links when the cursor/selection overlaps a link range,
+/// falling back to the built-in path/URL detection otherwise.
 fn goto_file_impl(cx: &mut Context, action: Action) {
     let (view, doc) = current_ref!(cx.editor);
-    let text = doc.text().slice(..);
-    let selections = doc.selection(view.id);
-    let primary = selections.primary();
+    let text = doc.text().clone();
+    let selections = doc.selection(view.id).ranges().to_vec();
     let rel_path = doc
         .relative_path()
         .map(|path| path.parent().unwrap().to_path_buf())
         .unwrap_or_default();
+    let text = text.slice(..);
 
-    let paths: Vec<_> = if selections.len() == 1 && primary.len() == 1 {
+    let mut lsp_targets = Vec::new();
+    let mut lsp_targets_seen = HashSet::new();
+    let mut fallback_ranges = Vec::new();
+
+    if doc.document_links.is_empty() {
+        fallback_ranges.extend_from_slice(&selections);
+    } else {
+        for selection in &selections {
+            let mut matched = false;
+            for link in &doc.document_links {
+                if !selection_overlaps_document_link(selection, link) {
+                    continue;
+                }
+                matched = true;
+                if let Some(target) = resolve_document_link_target(cx.editor, link) {
+                    if lsp_targets_seen.insert(target.clone()) {
+                        lsp_targets.push(target);
+                    }
+                }
+            }
+            if !matched {
+                fallback_ranges.push(*selection);
+            }
+        }
+    }
+
+    for target in lsp_targets {
+        open_url(cx, target, action);
+    }
+
+    if fallback_ranges.is_empty() {
+        return;
+    }
+
+    let paths: Vec<_> = if fallback_ranges.len() == 1 && fallback_ranges[0].len() == 1 {
+        let selection = fallback_ranges[0];
         // Cap the search at roughly 1k bytes around the cursor.
         let lookaround = 1000;
-        let pos = text.char_to_byte(primary.cursor(text));
+        let pos = text.char_to_byte(selection.cursor(text));
         let search_start = text
             .line_to_byte(text.byte_to_line(pos))
             .max(text.floor_char_boundary(pos.saturating_sub(lookaround)));
@@ -1357,13 +1433,13 @@ fn goto_file_impl(cx: &mut Context, action: Action) {
             .find(|range| pos <= search_start + range.end)
             .map(|range| Cow::from(search_range.byte_slice(range)));
         log::debug!("goto_file auto-detected path: {path:?}");
-        let path = path.unwrap_or_else(|| primary.fragment(text));
+        let path = path.unwrap_or_else(|| selection.fragment(text));
         vec![path.into_owned()]
     } else {
         // Otherwise use each selection, trimmed.
-        selections
-            .fragments(text)
-            .map(|sel| sel.trim().to_owned())
+        fallback_ranges
+            .iter()
+            .map(|range| range.fragment(text).trim().to_owned())
             .filter(|sel| !sel.is_empty())
             .collect()
     };
@@ -4192,14 +4268,23 @@ pub mod insert {
 
     fn insert_tab_impl(cx: &mut Context, count: usize) {
         let (view, doc) = current!(cx.editor);
-        // TODO: round out to nearest indentation level (for example a line with 3 spaces should
-        // indent by one to reach 4 spaces).
 
-        let indent = Tendril::from(doc.indent_style.as_str().repeat(count));
-        let transaction = Transaction::insert(
+        let transaction = Transaction::change(
             doc.text(),
-            &doc.selection(view.id).clone().cursors(doc.text().slice(..)),
-            indent,
+            doc.selection(view.id).ranges().iter().map(|range| {
+                let cursor = range.cursor(doc.text().slice(..));
+                let indent = if let IndentStyle::Spaces(indent_width) = doc.indent_style {
+                    let line = range.cursor_line(doc.text().slice(..));
+                    let line_start = doc.text().line_to_char(line);
+                    let offset = (cursor - line_start) % indent_width as usize;
+
+                    Tendril::from(doc.indent_style.as_str().repeat(count)).split_off(offset)
+                } else {
+                    Tendril::from(doc.indent_style.as_str().repeat(count))
+                };
+
+                (cursor, cursor, Some(indent))
+            }),
         );
         doc.apply(&transaction, view.id);
     }
@@ -4930,7 +5015,16 @@ fn indent(cx: &mut Context) {
                 return None;
             }
             let pos = doc.text().line_to_char(line);
-            Some((pos, pos, Some(indent.clone())))
+
+            let indent = if let IndentStyle::Spaces(indent_width) = doc.indent_style {
+                let line = doc.text().line(line);
+                let offset = line.first_non_whitespace_char().unwrap_or(0) % indent_width as usize;
+                indent.clone().split_off(offset)
+            } else {
+                indent.clone()
+            };
+
+            Some((pos, pos, Some(indent)))
         }),
     );
     doc.apply(&transaction, view.id);

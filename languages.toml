@@ -139,6 +139,7 @@ solc = { command = "solc", args = ["--lsp"] }
 sourcekit-lsp = { command = "sourcekit-lsp" }
 spade-language-server = {command = "spade-language-server"}
 starpls = {command = "starpls"}
+styx = { command = "styx", args = ["lsp"] }
 svlangserver = { command = "svlangserver", args = [], config.systemverilog.includeIndexing = ["*.{v,vh,sv,svh}", "**/*.{v,vh,sv,svh}"] }
 swipl = { command = "swipl", args = [ "-g", "use_module(library(lsp_server))", "-g", "lsp_server:main", "-t", "halt", "--", "stdio" ] }
 superhtml = {  command = "superhtml", args = ["lsp"]}
@@ -311,6 +312,9 @@ args = ["start", "--stdio"]
 [language-server.kcl-lsp]
 command = "kcl-language-server"
 args = ["server", "--stdio"]
+
+[language-server.drools-lsp]
+command = "drools-lsp"
 
 [[language]]
 name = "rust"
@@ -1496,7 +1500,7 @@ indent = { tab-width = 4, unit = "    " }
 
 [[grammar]]
 name = "smali"
-source = { git = "https://github.com/amaanq/tree-sitter-smali", rev = "5ae51e15c4d1ac93cba6127caf3d1f0a072c140c" }
+source = { git = "https://github.com/tree-sitter-grammars/tree-sitter-smali", rev = "fdfa6a1febc43c7467aa7e937b87b607956f2346" }
 
 [[language]]
 name = "ledger"
@@ -5317,6 +5321,26 @@ indent = { tab-width = 4, unit="    "}
 name = "klog"
 source = { git = "https://github.com/Ansimorph/tree-sitter-klog/", rev = "0b215fe75bdeb8368546e3cee36aca8c19212d06" }
 
+[[language]]
+name = "styx"
+scope = "source.styx"
+injection-regex = "styx"
+file-types = ["styx"]
+comment-tokens = ["//", "///"]
+language-servers = ["styx"]
+indent = { tab-width = 2, unit = "  " }
+auto-format = true
+
+[language.auto-pairs]
+'(' = ')'
+'{' = '}'
+'"' = '"'
+"'" = "'"
+
+[[grammar]]
+name = "styx"
+source = { git = "https://github.com/bearcove/styx", subpath = "crates/tree-sitter-styx" , rev = "ff7f49629a20a308111810a0c5e6228617133ea7" }
+
 # https://docs.tilt.dev/editor.html
 [[language]]
 name = "tilt"
@@ -5345,6 +5369,19 @@ comment-token = "#"
 [[grammar]]
 name = "gnuplot"
 source = { git = "https://codeberg.org/maribu/tree-sitter-gnuplot", rev = "21a3a3929facb964b3592daeb69119294ff84cf2" }
+
+[[language]]
+name = "drools"
+scope = "source.drools"
+file-types = ["drl"]
+roots = ["pom.xml", ".git"]
+comment-tokens = "//"
+language-servers = [ "drools-lsp" ]
+formatter = { command = "drools-fmt" }
+
+[[grammar]]
+name = "drools"
+source = { git = "https://github.com/iByteABit256/tree-sitter-drools", rev = "f1404d2a3974dfcfd4193246e763edeeb4b399c1" }
 
 [[language]]
 name = "proverif"
