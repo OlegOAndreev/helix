@@ -1255,6 +1255,16 @@ pub struct Editor {
 
     pub mouse_down_range: Option<Range>,
     pub cursor_cache: CursorCache,
+
+    /// Bufferline click tracking: positions of buffers in the bufferline
+    pub bufferline_positions: Vec<BufferLinePosition>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BufferLinePosition {
+    pub doc_id: DocumentId,
+    pub x_start: u16, // inclusive
+    pub x_end: u16,   // exclusive
 }
 
 pub type Motion = Box<dyn Fn(&mut Editor)>;
@@ -1376,6 +1386,7 @@ impl Editor {
             handlers,
             mouse_down_range: None,
             cursor_cache: CursorCache::default(),
+            bufferline_positions: Vec::new(),
             dir_stack: VecDeque::with_capacity(DIR_STACK_CAP),
         }
     }
@@ -2168,6 +2179,14 @@ impl Editor {
     pub fn document_by_path_mut<P: AsRef<Path>>(&mut self, path: P) -> Option<&mut Document> {
         self.documents_mut()
             .find(|doc| doc.path().map(|p| p == path.as_ref()).unwrap_or(false))
+    }
+
+    /// Returns the document ID at the given column in the bufferline
+    pub fn buffer_at_column(&self, column: u16) -> Option<DocumentId> {
+        self.bufferline_positions
+            .iter()
+            .find(|pos| column >= pos.x_start && column < pos.x_end)
+            .map(|pos| pos.doc_id)
     }
 
     /// Returns all supported diagnostics for the document

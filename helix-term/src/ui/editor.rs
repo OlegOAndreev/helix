@@ -25,7 +25,7 @@ use helix_core::{
 use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::{Mode, SCRATCH_BUFFER_NAME},
-    editor::{CompleteAction, CursorShapeConfig},
+    editor::{CompleteAction, Config, CursorShapeConfig},
     graphics::{Color, CursorKind, Modifier, Rect, Style},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
@@ -72,6 +72,16 @@ impl EditorView {
 
     pub fn spinners_mut(&mut self) -> &mut ProgressSpinners {
         &mut self.spinners
+    }
+
+    /// Check if bufferline should be rendered based on config and document count
+    fn should_render_bufferline(config: &Config, document_count: usize) -> bool {
+        use helix_view::editor::BufferLine;
+        match config.bufferline {
+            BufferLine::Always => true,
+            BufferLine::Multiple if document_count > 1 => true,
+            _ => false,
+        }
     }
 
     pub fn render_view(
@@ -655,7 +665,7 @@ impl EditorView {
     }
 
     /// Render bufferline at the top
-    pub fn render_bufferline(editor: &Editor, viewport: Rect, surface: &mut Surface) {
+    pub fn render_bufferline(editor: &mut Editor, viewport: Rect, surface: &mut Surface) {
         let scratch = PathBuf::from(SCRATCH_BUFFER_NAME); // default filename to use for scratch buffer
         surface.clear_with(
             viewport,
@@ -678,6 +688,9 @@ impl EditorView {
         let mut x = viewport.x;
         let current_doc = view!(editor).doc;
 
+        // Clear previous buffer positions and build new ones
+        let mut buffer_positions = Vec::new();
+
         for doc in editor.documents() {
             let fname = doc
                 .path()
@@ -697,14 +710,28 @@ impl EditorView {
             let used_width = viewport.x.saturating_sub(x);
             let rem_width = surface.area.width.saturating_sub(used_width);
 
+            // Store start position before rendering
+            let x_start = x;
+
+            // Render and get new x position
             x = surface
-                .set_stringn(x, viewport.y, text, rem_width as usize, style)
+                .set_stringn(x, viewport.y, &text, rem_width as usize, style)
                 .0;
+
+            // Store buffer position for click handling
+            buffer_positions.push(helix_view::editor::BufferLinePosition {
+                doc_id: doc.id(),
+                x_start,
+                x_end: x,
+            });
 
             if x >= surface.area.right() {
                 break;
             }
         }
+
+        // Replace the buffer positions after iteration
+        editor.bufferline_positions = buffer_positions;
     }
 
     pub fn render_gutter<'d>(
@@ -1221,6 +1248,17 @@ impl EditorView {
             MouseEventKind::Down(MouseButton::Left) => {
                 let editor = &mut cxt.editor;
 
+                // Check if click is in bufferline area
+                let use_bufferline =
+                    Self::should_render_bufferline(&config, editor.documents.len());
+
+                if use_bufferline && row == 0 {
+                    if let Some(doc_id) = editor.buffer_at_column(column) {
+                        editor.switch(doc_id, helix_view::editor::Action::Replace);
+                        return EventResult::Consumed(None);
+                    }
+                }
+
                 if let Some((pos, view_id)) = pos_and_view(editor, row, column, true) {
                     editor.focus(view_id);
 
@@ -1602,12 +1640,7 @@ impl Component for EditorView {
         let config = cx.editor.config();
 
         // check if bufferline should be rendered
-        use helix_view::editor::BufferLine;
-        let use_bufferline = match config.bufferline {
-            BufferLine::Always => true,
-            BufferLine::Multiple if cx.editor.documents.len() > 1 => true,
-            _ => false,
-        };
+        let use_bufferline = Self::should_render_bufferline(&config, cx.editor.documents.len());
 
         // -1 for commandline and -1 for bufferline
         let mut editor_area = area.clip_bottom(1);
