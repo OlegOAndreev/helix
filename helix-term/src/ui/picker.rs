@@ -1158,6 +1158,18 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                     &annotations,
                 );
 
+                // Clamp scroll to keep at least scrolloff lines visible
+                let scrolloff = cx.editor.config().scrolloff;
+                let total_lines = text.len_lines();
+                let anchor_line = text.char_to_line(offset.anchor);
+                let max_line = total_lines.saturating_sub(scrolloff.max(1) + 1);
+                if anchor_line > max_line
+                    || (anchor_line == max_line && offset.vertical_offset > 0)
+                {
+                    offset.anchor = text.line_to_char(max_line);
+                    offset.vertical_offset = 0;
+                }
+
                 needs_store = true;
             }
             let loader = cx.editor.syn_loader.load();
