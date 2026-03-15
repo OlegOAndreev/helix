@@ -1163,9 +1163,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                 let total_lines = text.len_lines();
                 let anchor_line = text.char_to_line(offset.anchor);
                 let max_line = total_lines.saturating_sub(scrolloff.max(1) + 1);
-                if anchor_line > max_line
-                    || (anchor_line == max_line && offset.vertical_offset > 0)
-                {
+                if anchor_line > max_line {
                     offset.anchor = text.line_to_char(max_line);
                     offset.vertical_offset = 0;
                 }
