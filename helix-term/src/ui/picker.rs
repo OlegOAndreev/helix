@@ -678,12 +678,8 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                     if let Some(option) = self.selection() {
                         // Open the file
                         (self.callback_fn)(cx, option, self.default_action);
-                        // Return a callback to close the picker
-                        return EventResult::Consumed(Some(Box::new(
-                            |compositor: &mut Compositor, _ctx| {
-                                compositor.pop();
-                            },
-                        )));
+                        // Return a callback to close the picker using the same logic as close_fn
+                        return self.close_fn();
                     }
                     EventResult::Consumed(None)
                 } else {
@@ -692,6 +688,29 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             }
             _ => EventResult::Ignored(None),
         }
+    }
+
+    fn close_fn(&mut self) -> EventResult {
+        // if the picker is very large don't store it as last_picker to avoid
+        // excessive memory consumption
+        let callback: compositor::Callback =
+            if self.matcher.snapshot().item_count() > 1_000_000 {
+                Box::new(|compositor: &mut Compositor, _ctx| {
+                    // remove the layer
+                    compositor.pop();
+                })
+            } else {
+                // stop streaming in new items in the background, really we should
+                // be restarting the stream somehow once the picker gets
+                // reopened instead (like for an FS crawl) that would also remove the
+                // need for the special case above but that is pretty tricky
+                self.version.fetch_add(1, atomic::Ordering::Relaxed);
+                Box::new(|compositor: &mut Compositor, _ctx| {
+                    // remove the layer
+                    compositor.last_picker = compositor.pop();
+                })
+            };
+        EventResult::Consumed(Some(callback))
     }
 
     pub fn toggle_preview(&mut self) {
@@ -1282,29 +1301,6 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             Event::Key(event) => {
                 let key_event = *event;
 
-                let close_fn = |picker: &mut Self| {
-                    // if the picker is very large don't store it as last_picker to avoid
-                    // excessive memory consumption
-                    let callback: compositor::Callback =
-                        if picker.matcher.snapshot().item_count() > 1_000_000 {
-                            Box::new(|compositor: &mut Compositor, _ctx| {
-                                // remove the layer
-                                compositor.pop();
-                            })
-                        } else {
-                            // stop streaming in new items in the background, really we should
-                            // be restarting the stream somehow once the picker gets
-                            // reopened instead (like for an FS crawl) that would also remove the
-                            // need for the special case above but that is pretty tricky
-                            picker.version.fetch_add(1, atomic::Ordering::Relaxed);
-                            Box::new(|compositor: &mut Compositor, _ctx| {
-                                // remove the layer
-                                compositor.last_picker = compositor.pop();
-                            })
-                        };
-                    EventResult::Consumed(Some(callback))
-                };
-
                 match key_event {
                     shift!(Tab) | key!(Up) | ctrl!('p') => {
                         self.move_by(1, Direction::Backward);
@@ -1324,7 +1320,7 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
                     key!(End) => {
                         self.to_end();
                     }
-                    key!(Esc) | ctrl!('c') => return close_fn(self),
+                    key!(Esc) | ctrl!('c') => return self.close_fn(),
                     alt!(Enter) => {
                         if let Some(option) = self.selection() {
                             (self.callback_fn)(ctx, option, self.default_action);
@@ -1362,20 +1358,20 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
                                     ctx.editor.set_error(err.to_string());
                                 }
                             }
-                            return close_fn(self);
+                            return self.close_fn();
                         }
                     }
                     ctrl!('s') => {
                         if let Some(option) = self.selection() {
                             (self.callback_fn)(ctx, option, Action::HorizontalSplit);
                         }
-                        return close_fn(self);
+                        return self.close_fn();
                     }
                     ctrl!('v') => {
                         if let Some(option) = self.selection() {
                             (self.callback_fn)(ctx, option, Action::VerticalSplit);
                         }
-                        return close_fn(self);
+                        return self.close_fn();
                     }
                     ctrl!('t') => {
                         self.toggle_preview();
