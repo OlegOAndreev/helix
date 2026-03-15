@@ -1283,6 +1283,7 @@ pub enum EditorEvent {
 pub enum ConfigEvent {
     Refresh,
     Update(Box<Config>),
+    ThemeChanged,
 }
 
 enum ThemeAction {
