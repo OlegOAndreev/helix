@@ -1077,7 +1077,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         // Get offset and pending scroll delta before borrowing self
         let has_offset = self.preview_offset.is_some();
         let mut offset = self.preview_offset.unwrap_or_default();
-        let mut needs_store = false;
+        let mut updated_offset = false;
         let scroll_delta = self.pending_preview_scroll;
 
         if let Some((preview, range)) = self.get_preview(cx.editor) {
@@ -1141,6 +1141,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                         offset.anchor = start;
                     }
                 }
+                updated_offset = true;
             }
 
             // Apply pending scroll delta
@@ -1167,8 +1168,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
                     offset.anchor = text.line_to_char(max_line);
                     offset.vertical_offset = 0;
                 }
-
-                needs_store = true;
+                updated_offset = true;
             }
             let loader = cx.editor.syn_loader.load();
             let config = cx.editor.config();
@@ -1238,7 +1238,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         }
 
         // Store the updated offset if we calculated one
-        if needs_store {
+        if updated_offset {
             self.preview_offset = Some(offset);
             self.pending_preview_scroll = 0;
         }
