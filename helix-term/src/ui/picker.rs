@@ -690,7 +690,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         }
     }
 
-    fn close_fn(&mut self) -> EventResult {
+    fn close_fn(&self) -> EventResult {
         // if the picker is very large don't store it as last_picker to avoid
         // excessive memory consumption
         let callback: compositor::Callback =
