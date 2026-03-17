@@ -34,6 +34,9 @@ use crate::{
 
 use std::{cmp::Ordering, collections::HashSet, fmt::Display, future::Future, path::Path};
 
+/// Whether to skip constants, variables, fields etc. that have a container (i.e., are not top-level) in symbol pickers.
+const SKIP_MINOR_SYMBOLS_IN_PICKER: bool = true;
+
 /// Gets the first language server that is attached to a document which supports a specific feature.
 /// If there is no configured language server that supports the feature, this displays a status message.
 /// Using this macro in a context where the editor automatically queries the LSP
@@ -470,6 +473,22 @@ pub fn symbol_picker(cx: &mut Context) {
                 Err(err) => log::error!("Error requesting document symbols: {err}"),
             }
         }
+
+        // Filter out constants and variables that have a container if SKIP_CONSTANT_AND_VARIABLE is enabled
+        if SKIP_MINOR_SYMBOLS_IN_PICKER {
+            symbols.retain(|item| {
+                !matches!(
+                    item.symbol.kind,
+                    lsp::SymbolKind::CONSTANT
+                        | lsp::SymbolKind::VARIABLE
+                        | lsp::SymbolKind::FIELD
+                        | lsp::SymbolKind::PROPERTY
+                        | lsp::SymbolKind::ENUM_MEMBER
+                        | lsp::SymbolKind::TYPE_PARAMETER
+                ) || item.symbol.container_name.is_none()
+            });
+        }
+
         let call = move |editor: &mut Editor, compositor: &mut Compositor| {
             let styles = SymbolStyles::new(editor);
             let columns = [
@@ -590,6 +609,21 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
                 match response {
                     Ok(items) => {
                         for item in items {
+                            // Filter out constants and variables that have a container if SKIP_CONSTANT_AND_VARIABLE is enabled
+                            if SKIP_MINOR_SYMBOLS_IN_PICKER
+                                && matches!(
+                                    item.symbol.kind,
+                                    lsp::SymbolKind::CONSTANT
+                                        | lsp::SymbolKind::VARIABLE
+                                        | lsp::SymbolKind::FIELD
+                                        | lsp::SymbolKind::PROPERTY
+                                        | lsp::SymbolKind::ENUM_MEMBER
+                                        | lsp::SymbolKind::TYPE_PARAMETER
+                                )
+                                && item.symbol.container_name.is_some()
+                            {
+                                continue;
+                            }
                             injector.push(item)?;
                         }
                     }
