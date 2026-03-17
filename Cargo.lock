@@ -1601,6 +1601,8 @@ dependencies = [
  "imara-diff 0.2.0",
  "log",
  "parking_lot",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

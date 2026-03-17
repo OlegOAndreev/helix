@@ -12,6 +12,9 @@ use std::{
 #[cfg(feature = "git")]
 mod git;
 
+#[cfg(feature = "arc")]
+mod arc;
+
 mod diff;
 
 pub use diff::{DiffHandle, Hunk};
@@ -79,11 +82,11 @@ impl DiffProviderRegistry {
 
 impl Default for DiffProviderRegistry {
     fn default() -> Self {
-        // currently only git is supported
-        // TODO make this configurable when more providers are added
         let providers = vec![
             #[cfg(feature = "git")]
             DiffProvider::Git,
+            #[cfg(feature = "arc")]
+            DiffProvider::Arc,
             DiffProvider::None,
         ];
         DiffProviderRegistry { providers }
@@ -98,6 +101,8 @@ impl Default for DiffProviderRegistry {
 enum DiffProvider {
     #[cfg(feature = "git")]
     Git,
+    #[cfg(feature = "arc")]
+    Arc,
     None,
 }
 
@@ -106,6 +111,8 @@ impl DiffProvider {
         match self {
             #[cfg(feature = "git")]
             Self::Git => git::get_diff_base(file),
+            #[cfg(feature = "arc")]
+            Self::Arc => arc::get_diff_base(file),
             Self::None => bail!("No diff support compiled in"),
         }
     }
@@ -114,6 +121,8 @@ impl DiffProvider {
         match self {
             #[cfg(feature = "git")]
             Self::Git => git::get_current_head_name(file),
+            #[cfg(feature = "arc")]
+            Self::Arc => arc::get_current_head_name(file),
             Self::None => bail!("No diff support compiled in"),
         }
     }
@@ -126,6 +135,8 @@ impl DiffProvider {
         match self {
             #[cfg(feature = "git")]
             Self::Git => git::for_each_changed_file(cwd, f),
+            #[cfg(feature = "arc")]
+            Self::Arc => arc::for_each_changed_file(cwd, f),
             Self::None => bail!("No diff support compiled in"),
         }
     }
