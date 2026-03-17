@@ -27,6 +27,14 @@ struct StatusEntry {
     path: String,
 }
 
+#[derive(Deserialize)]
+struct BranchInfo {
+    name: String,
+    current: Option<bool>,
+    #[allow(dead_code)]
+    local: bool,
+}
+
 pub fn get_diff_base(file: &Path) -> Result<Vec<u8>> {
     debug_assert!(!file.exists() || file.is_file());
     debug_assert!(file.is_absolute());
@@ -46,7 +54,7 @@ pub fn get_diff_base(file: &Path) -> Result<Vec<u8>> {
     let path_str = path_arg.to_str().context("path contains invalid UTF-8")?;
 
     let output =
-        run_arc_command(&["show", path_str], &repo_dir).context("failed to get diff base")?;
+        run_arc_command(&["show", path_str], &repo_root).context("failed to get diff base")?;
 
     Ok(output.into_bytes())
 }
@@ -58,26 +66,18 @@ pub fn get_current_head_name(file: &Path) -> Result<Arc<ArcSwap<Box<str>>>> {
 
     let repo_dir = get_repo_dir(&file)?;
 
-    let name = match run_arc_command(&["branch", "--show-current"], &repo_dir) {
-        Ok(branch) => {
-            let branch = branch.trim();
-            if !branch.is_empty() {
-                branch.to_string()
-            } else {
-                get_head_commit(&repo_dir)?
-            }
-        }
-        Err(_) => get_head_commit(&repo_dir)?,
+    let output = run_arc_command(&["branch", "--json"], &repo_dir)
+        .context("failed to get branch information")?;
+
+    let branches: Vec<BranchInfo> =
+        serde_json::from_str(&output).context("failed to parse branch JSON")?;
+
+    let name = match branches.iter().find(|branch| branch.current == Some(true)) {
+        Some(branch) => branch.name.clone(),
+        None => String::new(),
     };
 
     Ok(Arc::new(ArcSwap::from_pointee(name.into_boxed_str())))
-}
-
-fn get_head_commit(repo_dir: &Path) -> Result<String> {
-    let log = run_arc_command(&["log", "--oneline", "-1"], repo_dir)
-        .context("failed to get commit hash")?;
-    let commit = log.split_whitespace().next();
-    Ok(commit.unwrap_or("HEAD").to_string())
 }
 
 pub fn for_each_changed_file(cwd: &Path, f: impl Fn(Result<FileChange>) -> bool) -> Result<()> {
