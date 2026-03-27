@@ -123,7 +123,7 @@ fn parse_status_entry(entry: &StatusEntry, repo_dir: &Path) -> Result<FileChange
     let path = repo_dir.join(&entry.path);
 
     match entry.status.as_str() {
-        "new file" | "modified" => Ok(FileChange::Modified { path }),
+        "new file" | "copied" | "modified" => Ok(FileChange::Modified { path }),
         "untracked" => Ok(FileChange::Untracked { path }),
         "deleted" => Ok(FileChange::Deleted { path }),
         "conflict" | "conflicted" => Ok(FileChange::Conflict { path }),
